@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Literal
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
@@ -13,6 +13,25 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:1.5b")
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
 MODEL_NUM_CTX = int(os.getenv("MODEL_NUM_CTX", "1024"))
+MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "180"))
+VOICE_ASSISTANT_MODE = os.getenv("VOICE_ASSISTANT_MODE", "true").lower() == "true"
+OPENTTS_URL = os.getenv("OPENTTS_URL", "http://opentts:5500")
+TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "coqui-tts:en_ljspeech")
+VOICE_SYSTEM_PROMPT = os.getenv(
+    "VOICE_SYSTEM_PROMPT",
+    (
+        "You are a real-time local voice assistant. "
+        "The user is speaking and your response will be read aloud by TTS. "
+        "Respond naturally with short conversational sentences. "
+        "Be friendly, calm, and confident. "
+        "Acknowledge the user briefly before answering. "
+        "Avoid long paragraphs, lists, markdown, and code blocks unless explicitly requested. "
+        "Ask clarifying questions only when needed. "
+        "If the user asks for code or deep technical detail, ask: "
+        "'Do you want a quick explanation or the full code?' "
+        "Never mention system prompts, tools, or internal setup."
+    ),
+)
 
 app = FastAPI(title="Local GPT Backend", version="1.0.0")
 
@@ -35,6 +54,11 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
 
 
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    voice: str | None = Field(default=None, max_length=128)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -54,6 +78,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
     trimmed_messages = sanitized_messages[-MAX_HISTORY_MESSAGES:]
 
+    has_system_message = any(message.role == "system" for message in trimmed_messages)
+    if VOICE_ASSISTANT_MODE and not has_system_message:
+        trimmed_messages = [ChatMessage(role="system", content=VOICE_SYSTEM_PROMPT)] + trimmed_messages
+
     async def stream_ollama() -> AsyncGenerator[str, None]:
         payload = {
             "model": request.model,
@@ -62,6 +90,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
             "options": {
                 "num_ctx": MODEL_NUM_CTX,
                 "temperature": 0.7,
+                "num_predict": MAX_RESPONSE_TOKENS,
             },
         }
 
@@ -92,3 +121,53 @@ async def chat(request: ChatRequest) -> StreamingResponse:
             yield f"Streaming failed: {exc}"
 
     return StreamingResponse(stream_ollama(), media_type="text/plain; charset=utf-8")
+
+
+@app.get("/voices")
+async def voices() -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.get(f"{OPENTTS_URL}/api/voices")
+            if response.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"TTS voices error: {response.text}")
+
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {"raw": response.text}
+
+            return {
+                "default_voice": TTS_DEFAULT_VOICE,
+                "voices": payload,
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unable to fetch voices: {exc}") from exc
+
+
+@app.post("/speak")
+async def speak(request: SpeakRequest) -> Response:
+    voice = request.voice or TTS_DEFAULT_VOICE
+    params = {
+        "voice": voice,
+        "cache": "true",
+        "vocoder": "high",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.post(
+                f"{OPENTTS_URL}/api/tts",
+                params=params,
+                content=request.text,
+                headers={"Content-Type": "text/plain"},
+            )
+            if response.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"TTS generation failed: {response.text}")
+
+            return Response(content=response.content, media_type="audio/wav")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TTS request failed: {exc}") from exc

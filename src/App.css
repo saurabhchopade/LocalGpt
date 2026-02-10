@@ -37,6 +37,34 @@
   font-weight: 600;
 }
 
+.voice-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.voice-select {
+  border: 1px solid #d8dde6;
+  border-radius: 10px;
+  padding: 0.32rem 0.65rem;
+  font-size: 0.82rem;
+  background: #fff;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.voice-select:focus {
+  outline: 2px solid #b8d4ff;
+  border-color: #8bb4f8;
+}
+
+.ghost-btn.active {
+  border-color: #2563eb;
+  background: #e0e7ff;
+  color: #1e3a8a;
+}
+
 .model-picker {
   min-width: 170px;
 }
@@ -78,6 +106,42 @@
 .ghost-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.live-transcript {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 0.9rem;
+  border: 1px solid #bae6fd;
+  margin: 0 1rem;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #06b6d4;
+  animation: pulse-dot 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
 }
 
 .chat-window {
@@ -466,5 +530,32 @@
 
   .composer textarea::placeholder {
     color: #9ca3af;
+  }
+
+  .voice-select {
+    background: #111827;
+    border-color: #374151;
+    color: #e5e7eb;
+  }
+
+  .voice-select:focus {
+    outline: 2px solid #2563eb;
+    border-color: #2563eb;
+  }
+
+  .ghost-btn.active {
+    border-color: #60a5fa;
+    background: #1e40af;
+    color: #e0e7ff;
+  }
+
+  .live-transcript {
+    background: #0f172a;
+    border-color: #1e293b;
+    color: #c7d2fe;
+  }
+
+  .pulse-dot {
+    background: #38bdf8;
   }
 }

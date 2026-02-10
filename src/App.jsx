@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const MODEL_OPTIONS = ['qwen2.5:1.5b', 'qwen2.5:3b', 'deepseek-coder:6.7b']
@@ -135,23 +135,108 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [model, setModel] = useState('qwen2.5:1.5b')
   const [copiedId, setCopiedId] = useState('')
+  const [isListening, setIsListening] = useState(false)
+  const [liveTranscript, setLiveTranscript] = useState('')
+  const [autoSpeak, setAutoSpeak] = useState(true)
+  const [voiceOptions, setVoiceOptions] = useState(['coqui-tts:en_ljspeech'])
+  const [ttsVoice, setTtsVoice] = useState('coqui-tts:en_ljspeech')
   const abortRef = useRef(null)
+  const recognitionRef = useRef(null)
+  const audioRef = useRef(null)
+  const audioUrlRef = useRef(null)
   const endRef = useRef(null)
 
   const canSend = useMemo(() => input.trim().length > 0 && !isLoading, [input, isLoading])
-  const sanitizeMessages = (items) =>
+  const getNonEmptyMessages = (items) =>
     items.filter((item) => typeof item.content === 'string' && item.content.trim().length > 0)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, isLoading])
 
+  useEffect(() => {
+    const loadVoices = async () => {
+      try {
+        const response = await fetch('/api/voices')
+        if (!response.ok) return
+        const payload = await response.json()
+        const rawVoices = payload?.voices
+        const flattened = Array.isArray(rawVoices)
+          ? rawVoices
+          : rawVoices && typeof rawVoices === 'object'
+            ? Object.keys(rawVoices)
+            : []
+
+        if (flattened.length) {
+          setVoiceOptions(flattened)
+          if (payload?.default_voice && flattened.includes(payload.default_voice)) {
+            setTtsVoice(payload.default_voice)
+          } else if (!flattened.includes(ttsVoice)) {
+            setTtsVoice(flattened[0])
+          }
+        }
+      } catch {
+        // OpenTTS unavailable; keep default voice string.
+      }
+    }
+
+    loadVoices()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.stop()
+      if (audioRef.current) audioRef.current.pause()
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
+    }
+  }, [])
+
+  const speakText = async (text) => {
+    if (!autoSpeak || !text.trim()) return
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current)
+        audioUrlRef.current = null
+      }
+
+      const response = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: ttsVoice }),
+      })
+      if (!response.ok) return
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      audioUrlRef.current = objectUrl
+      const audio = new Audio(objectUrl)
+      audioRef.current = audio
+      audio.onended = () => {
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current)
+          audioUrlRef.current = null
+        }
+      }
+      await audio.play()
+    } catch {
+      // Ignore playback errors to keep chat responsive.
+    }
+  }
+
   const streamResponse = async (nextMessages) => {
     const controller = new AbortController()
     abortRef.current = controller
     setIsLoading(true)
 
-    setMessages((prev) => [...prev, createMessage('assistant', '')])
+    const assistantMessage = createMessage('assistant', '')
+    setMessages((prev) => [...prev, assistantMessage])
+
+    let assistantText = ''
+    let wasAborted = false
 
     try {
       const response = await fetch('/api/chat', {
@@ -159,7 +244,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: sanitizeMessages(nextMessages),
+          messages: getNonEmptyMessages(nextMessages).map(({ role, content }) => ({ role, content })),
         }),
         signal: controller.signal,
       })
@@ -178,50 +263,45 @@ function App() {
         done = streamDone
         if (value) {
           const chunk = decoder.decode(value, { stream: true })
-          setMessages((prev) => {
-            const updated = [...prev]
-            const last = updated[updated.length - 1]
-            if (last && last.role === 'assistant') {
-              last.content += chunk
-            }
-            return updated
-          })
+          assistantText += chunk
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessage.id ? { ...msg, content: msg.content + chunk } : msg,
+            ),
+          )
         }
       }
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        setMessages((prev) => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (last && last.role === 'assistant' && !last.content) {
-            last.content = `Error: ${error.message}`
-          }
-          return updated
-        })
+      if (error.name === 'AbortError') {
+        wasAborted = true
+        setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessage.id || msg.content.trim()))
       } else {
-        setMessages((prev) => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (last && last.role === 'assistant' && !last.content) {
-            updated.pop()
-          }
-          return updated
-        })
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessage.id && !msg.content
+              ? { ...msg, content: `Error: ${error.message}` }
+              : msg,
+          ),
+        )
       }
     } finally {
       setIsLoading(false)
       abortRef.current = null
+      if (!wasAborted && assistantText.trim()) {
+        speakText(assistantText)
+      }
     }
   }
 
-  const sendMessage = async () => {
-    const userText = input.trim()
+  const sendMessage = async (textOverride = '') => {
+    const userText = (textOverride || input).trim()
     if (!userText || isLoading) return
 
-    const cleanHistory = sanitizeMessages(messages)
+    const cleanHistory = getNonEmptyMessages(messages)
     const nextMessages = [...cleanHistory, createMessage('user', userText)]
     setMessages(nextMessages)
     setInput('')
+    setLiveTranscript('')
     await streamResponse(nextMessages)
   }
 
@@ -234,10 +314,14 @@ function App() {
     if (abortRef.current) {
       abortRef.current.abort()
     }
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
   }
 
   const clearChat = () => {
     if (isLoading) return
+    stopStreaming()
     setMessages([])
   }
 
@@ -249,6 +333,63 @@ function App() {
     } catch {
       setCopiedId('')
     }
+  }
+
+  const startListening = () => {
+    if (isLoading || isListening) return
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setMessages((prev) => [...prev, createMessage('assistant', 'Voice input is not supported in this browser.')])
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
+    recognition.interimResults = true
+    recognition.continuous = false
+    recognition.maxAlternatives = 1
+
+    let finalText = ''
+    recognition.onresult = (event) => {
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0].transcript
+        if (event.results[i].isFinal) {
+          finalText += `${transcript} `
+        } else {
+          interim += transcript
+        }
+      }
+      const cleanedFinal = finalText.trim()
+      const cleanedInterim = interim.trim()
+      setLiveTranscript(cleanedInterim)
+      setInput(cleanedFinal || cleanedInterim)
+    }
+
+    recognition.onerror = () => {
+      setIsListening(false)
+      setLiveTranscript('')
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+      setLiveTranscript('')
+      const cleaned = finalText.trim()
+      if (cleaned && !isLoading) {
+        sendMessage(cleaned)
+      }
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setIsListening(true)
+  }
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+    }
+    setIsListening(false)
   }
 
   const formatTime = (value) =>
@@ -267,9 +408,40 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="title-wrap">
-          <h1 className="app-title">Local GPT</h1>
+          <h1 className="app-title">Local GPT Voice</h1>
           <span className="active-model">{model}</span>
         </div>
+
+        <div className="voice-controls">
+          <select
+            className="voice-select"
+            value={ttsVoice}
+            onChange={(e) => setTtsVoice(e.target.value)}
+            disabled={isLoading}
+          >
+            {voiceOptions.map((voiceName) => (
+              <option key={voiceName} value={voiceName}>
+                {voiceName}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={`ghost-btn ${autoSpeak ? 'active' : ''}`}
+            onClick={() => setAutoSpeak((value) => !value)}
+          >
+            {autoSpeak ? 'Speaker On' : 'Speaker Off'}
+          </button>
+          <button
+            type="button"
+            className={`ghost-btn ${isListening ? 'active' : ''}`}
+            onClick={isListening ? stopListening : startListening}
+            disabled={isLoading}
+          >
+            {isListening ? 'Listening...' : 'Mic'}
+          </button>
+        </div>
+
         <div className="model-picker">
           <select
             id="model"
@@ -284,6 +456,7 @@ function App() {
             ))}
           </select>
         </div>
+
         <div className="header-actions">
           <button type="button" className="ghost-btn" onClick={clearChat} disabled={isLoading || !messages.length}>
             Clear
@@ -294,10 +467,17 @@ function App() {
         </div>
       </header>
 
+      {liveTranscript && (
+        <div className="live-transcript">
+          <span className="pulse-dot" />
+          {liveTranscript}
+        </div>
+      )}
+
       <main className="chat-window">
         {messages.length === 0 && (
           <div className="empty-state">
-            <p>How can I help you today?</p>
+            <p>Tap Mic and start speaking. I will answer in voice.</p>
           </div>
         )}
         <div className="messages">
@@ -329,7 +509,7 @@ function App() {
       <form className="composer" onSubmit={onSubmit}>
         <textarea
           rows={1}
-          placeholder="Message Local GPT"
+          placeholder={isListening ? 'Listening...' : 'Type or use Mic'}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
@@ -352,4 +532,3 @@ function App() {
 }
 
 export default App
-
