@@ -104,8 +104,19 @@ const renderMarkdownText = (text) => {
 }
 
 const MessageContent = ({ content }) => {
+  const [copiedCodeId, setCopiedCodeId] = useState('')
   const parts = content.split(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g)
   const blocks = []
+
+  const copyCodeSnippet = async (code, snippetId) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopiedCodeId(snippetId)
+      window.setTimeout(() => setCopiedCodeId(''), 1200)
+    } catch {
+      setCopiedCodeId('')
+    }
+  }
 
   for (let i = 0; i < parts.length; i += 1) {
     if (i % 3 === 0) {
@@ -120,9 +131,19 @@ const MessageContent = ({ content }) => {
     } else if (i % 3 === 1) {
       const lang = parts[i] || ''
       const code = parts[i + 1] || ''
+      const snippetId = `code-${i}`
       blocks.push(
         <pre key={`code-${i}`} className="code-block">
-          <div className="code-header">{lang || 'code'}</div>
+          <div className="code-header">
+            <span>{lang || 'code'}</span>
+            <button
+              type="button"
+              className="code-copy-btn"
+              onClick={() => copyCodeSnippet(code, snippetId)}
+            >
+              {copiedCodeId === snippetId ? 'Copied' : 'Copy'}
+            </button>
+          </div>
           <code dangerouslySetInnerHTML={{ __html: highlightCodeToHtml(code, lang) }} />
         </pre>,
       )
@@ -149,6 +170,7 @@ function App() {
   const [ttsVoice, setTtsVoice] = useState('coqui-tts:en_ljspeech')
   const [autoListen, setAutoListen] = useState(true)
   const [speechError, setSpeechError] = useState('')
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const abortRef = useRef(null)
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
@@ -156,6 +178,8 @@ function App() {
   const endRef = useRef(null)
   const autoListenRef = useRef(autoListen)
   const isLoadingRef = useRef(isLoading)
+  const isSpeakingRef = useRef(isSpeaking)
+  const markSpeechFinishedRef = useRef(() => {})
 
   const canSend = useMemo(() => input.trim().length > 0 && !isLoading, [input, isLoading])
   const getNonEmptyMessages = (items) =>
@@ -172,6 +196,10 @@ function App() {
   useEffect(() => {
     isLoadingRef.current = isLoading
   }, [isLoading])
+
+  useEffect(() => {
+    isSpeakingRef.current = isSpeaking
+  }, [isSpeaking])
 
   useEffect(() => {
     const loadVoices = async () => {
@@ -203,23 +231,147 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const speakText = async (text) => {
-    if (!autoSpeak || !text.trim()) return
-    try {
-      if (audioRef.current) {
-        audioRef.current.pause()
-      }
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current)
-        audioUrlRef.current = null
-      }
 
+  const cancelSpeechPlayback = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = null
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel()
+    }
+  }, [])
+
+  const stopStreaming = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort()
+    }
+    cancelSpeechPlayback()
+  }, [cancelSpeechPlayback])
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null
+      recognitionRef.current.onerror = null
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+    setIsListening(false)
+    setLiveTranscript('')
+  }, [])
+
+  const startListening = useCallback(() => {
+    if (recognitionRef.current || isLoadingRef.current || isSpeakingRef.current) return
+    if (typeof window === 'undefined') return
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setSpeechError('Voice input is not supported by this browser.')
+      setAutoListen(false)
+      return
+    }
+
+    setSpeechError('')
+    let finalTranscript = ''
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
+    recognition.interimResults = true
+    recognition.continuous = true
+    recognition.maxAlternatives = 1
+
+    recognition.onstart = () => {
+      setIsListening(true)
+    }
+
+    recognition.onspeechstart = () => {
+      cancelSpeechPlayback()
+      stopStreaming()
+      markSpeechFinishedRef.current?.()
+    }
+
+    recognition.onresult = (event) => {
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0]?.transcript ?? ''
+        if (event.results[i].isFinal) {
+          finalTranscript += `${transcript} `
+        } else {
+          interim += transcript
+        }
+      }
+      const cleanedFinal = finalTranscript.trim()
+      const cleanedInterim = interim.trim()
+      setLiveTranscript(cleanedInterim || cleanedFinal)
+      setInput(cleanedFinal || cleanedInterim)
+    }
+
+    recognition.onerror = (event) => {
+      const message = event?.error
+        ? `Voice input error: ${event.error}`
+        : 'Voice input was interrupted.'
+      setSpeechError(message)
+      setAutoListen(false)
+      stopListening()
+    }
+
+    recognition.onend = async () => {
+      recognitionRef.current = null
+      setIsListening(false)
+      const cleaned = finalTranscript.trim()
+      setLiveTranscript('')
+      if (cleaned && !isLoadingRef.current) {
+        await sendMessageRef.current(cleaned)
+      }
+      if (autoListenRef.current && !isLoadingRef.current && !isSpeakingRef.current) {
+        setTimeout(() => {
+          if (autoListenRef.current && !isLoadingRef.current && !isSpeakingRef.current) {
+            startListening()
+          }
+        }, 350)
+      }
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+  }, [stopListening, stopStreaming, cancelSpeechPlayback])
+
+  const markSpeechFinished = useCallback(() => {
+    if (!isSpeakingRef.current) return
+    setIsSpeaking(false)
+    if (autoListenRef.current && !isLoadingRef.current) {
+      startListening()
+    }
+  }, [startListening])
+
+  useEffect(() => {
+    markSpeechFinishedRef.current = markSpeechFinished
+  }, [markSpeechFinished])
+
+  const prepareForSpeech = useCallback(() => {
+    stopListening()
+    cancelSpeechPlayback()
+    setIsSpeaking(true)
+  }, [stopListening, cancelSpeechPlayback])
+
+  const speakText = async (text) => {
+    if (!autoSpeak || !text.trim() || typeof window === 'undefined') return
+
+    prepareForSpeech()
+
+    try {
       const response = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: ttsVoice }),
       })
-      if (!response.ok) return
+      if (!response.ok) {
+        throw new Error('TTS request failed')
+      }
 
       const blob = await response.blob()
       const objectUrl = URL.createObjectURL(blob)
@@ -227,14 +379,39 @@ function App() {
       const audio = new Audio(objectUrl)
       audioRef.current = audio
       audio.onended = () => {
-        if (audioUrlRef.current) {
-          URL.revokeObjectURL(audioUrlRef.current)
-          audioUrlRef.current = null
-        }
+        markSpeechFinished()
       }
       await audio.play()
+    } catch (error) {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.rate = 1.05
+        utterance.pitch = 1
+        utterance.voice = window.speechSynthesis.getVoices().find((voice) => voice.lang.includes('en')) || null
+        utterance.onend = markSpeechFinished
+        window.speechSynthesis.cancel()
+        window.speechSynthesis.speak(utterance)
+      } else {
+        console.warn('TTS playback failed', error)
+        markSpeechFinished()
+      }
+    }
+  }
+
+  const clearChat = () => {
+    if (isLoading) return
+    stopStreaming()
+    markSpeechFinished()
+    setMessages([])
+  }
+
+  const copyMessage = async (id, content) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedId(id)
+      window.setTimeout(() => setCopiedId(''), 1200)
     } catch {
-      // Ignore playback errors to keep chat responsive.
+      setCopiedId('')
     }
   }
 
@@ -319,108 +496,17 @@ function App() {
   const sendMessageRef = useRef(sendMessage)
   sendMessageRef.current = sendMessage
 
-  const cancelSpeechPlayback = () => {
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-    }
-  }
-
-  const stopListening = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null
-      recognitionRef.current.onerror = null
-      recognitionRef.current.stop()
-      recognitionRef.current = null
-    }
-    setIsListening(false)
-    setLiveTranscript('')
-  }, [])
-
-  const startListening = useCallback(() => {
-    if (recognitionRef.current || isLoadingRef.current) return
-    if (typeof window === 'undefined') return
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setSpeechError('Voice input is not supported by this browser.')
-      setAutoListen(false)
-      return
-    }
-
-    setSpeechError('')
-    let finalTranscript = ''
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'en-US'
-    recognition.interimResults = true
-    recognition.continuous = true
-    recognition.maxAlternatives = 1
-
-    recognition.onstart = () => {
-      setIsListening(true)
-    }
-
-    recognition.onspeechstart = () => {
-      cancelSpeechPlayback()
-    }
-
-    recognition.onresult = (event) => {
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const transcript = event.results[i][0]?.transcript ?? ''
-        if (event.results[i].isFinal) {
-          finalTranscript += `${transcript} `
-        } else {
-          interim += transcript
-        }
-      }
-      const cleanedFinal = finalTranscript.trim()
-      const cleanedInterim = interim.trim()
-      setLiveTranscript(cleanedInterim || cleanedFinal)
-      setInput(cleanedFinal || cleanedInterim)
-    }
-
-    recognition.onerror = (event) => {
-      const message = event?.error
-        ? `Voice input error: ${event.error}`
-        : 'Voice input was interrupted.'
-      setSpeechError(message)
-      setAutoListen(false)
-      stopListening()
-    }
-
-    recognition.onend = async () => {
-      recognitionRef.current = null
-      setIsListening(false)
-      const cleaned = finalTranscript.trim()
-      setLiveTranscript('')
-      if (cleaned && !isLoadingRef.current) {
-        await sendMessageRef.current(cleaned)
-      }
-      if (autoListenRef.current && !isLoadingRef.current) {
-        setTimeout(() => {
-          if (autoListenRef.current && !isLoadingRef.current) {
-            startListening()
-          }
-        }, 350)
-      }
-    }
-
-    recognitionRef.current = recognition
-    recognition.start()
-  }, [stopListening])
-
   useEffect(() => {
-    if (autoListen) {
+    if (autoListen && !isSpeaking) {
       startListening()
     }
     return () => {
       stopListening()
     }
-  }, [autoListen, startListening, stopListening])
+  }, [autoListen, startListening, stopListening, isSpeaking])
 
   useEffect(() => {
-    if (!isLoading && autoListenRef.current && !recognitionRef.current) {
+    if (!isLoading && autoListenRef.current && !recognitionRef.current && !isSpeakingRef.current) {
       startListening()
     }
   }, [isLoading, startListening])
@@ -433,36 +519,11 @@ function App() {
         URL.revokeObjectURL(audioUrlRef.current)
       }
     }
-  }, [stopListening])
+  }, [stopListening, cancelSpeechPlayback])
 
   const onSubmit = async (event) => {
     event.preventDefault()
     await sendMessage()
-  }
-
-  const stopStreaming = () => {
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
-    if (audioRef.current) {
-      audioRef.current.pause()
-    }
-  }
-
-  const clearChat = () => {
-    if (isLoading) return
-    stopStreaming()
-    setMessages([])
-  }
-
-  const copyMessage = async (id, content) => {
-    try {
-      await navigator.clipboard.writeText(content)
-      setCopiedId(id)
-      window.setTimeout(() => setCopiedId(''), 1200)
-    } catch {
-      setCopiedId('')
-    }
   }
 
   const formatTime = (value) =>
@@ -522,6 +583,11 @@ function App() {
             </span>
             {speechError && <span className="mic-error">{speechError}</span>}
           </div>
+          {isSpeaking && (
+            <div className="speaking-indicator">
+              Speaking aloud with {model}…
+            </div>
+          )}
         </div>
 
         <div className="model-picker">
