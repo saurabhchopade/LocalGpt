@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-const MODEL_OPTIONS = ['qwen2.5:1.5b', 'qwen2.5:3b', 'deepseek-coder:6.7b']
+const MODEL_OPTIONS = [
+  'qwen2.5:1.5b',
+  'qwen2.5:3b',
+  'qwen2.5:7b',
+  'deepseek-coder:6.7b',
+  'mistral-7b-v0.1',
+  'meta-llama/Llama-3-7b',
+]
 
 const createMessage = (role, content = '') => ({
   id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -133,18 +140,22 @@ function App() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [model, setModel] = useState('qwen2.5:1.5b')
+  const [model, setModel] = useState(MODEL_OPTIONS[0])
   const [copiedId, setCopiedId] = useState('')
   const [isListening, setIsListening] = useState(false)
   const [liveTranscript, setLiveTranscript] = useState('')
   const [autoSpeak, setAutoSpeak] = useState(true)
   const [voiceOptions, setVoiceOptions] = useState(['coqui-tts:en_ljspeech'])
   const [ttsVoice, setTtsVoice] = useState('coqui-tts:en_ljspeech')
+  const [autoListen, setAutoListen] = useState(true)
+  const [speechError, setSpeechError] = useState('')
   const abortRef = useRef(null)
   const recognitionRef = useRef(null)
   const audioRef = useRef(null)
   const audioUrlRef = useRef(null)
   const endRef = useRef(null)
+  const autoListenRef = useRef(autoListen)
+  const isLoadingRef = useRef(isLoading)
 
   const canSend = useMemo(() => input.trim().length > 0 && !isLoading, [input, isLoading])
   const getNonEmptyMessages = (items) =>
@@ -153,6 +164,14 @@ function App() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, isLoading])
+
+  useEffect(() => {
+    autoListenRef.current = autoListen
+  }, [autoListen])
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading
+  }, [isLoading])
 
   useEffect(() => {
     const loadVoices = async () => {
@@ -182,14 +201,6 @@ function App() {
 
     loadVoices()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (recognitionRef.current) recognitionRef.current.stop()
-      if (audioRef.current) audioRef.current.pause()
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
-    }
   }, [])
 
   const speakText = async (text) => {
@@ -305,6 +316,125 @@ function App() {
     await streamResponse(nextMessages)
   }
 
+  const sendMessageRef = useRef(sendMessage)
+  sendMessageRef.current = sendMessage
+
+  const cancelSpeechPlayback = () => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
+  }
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null
+      recognitionRef.current.onerror = null
+      recognitionRef.current.stop()
+      recognitionRef.current = null
+    }
+    setIsListening(false)
+    setLiveTranscript('')
+  }, [])
+
+  const startListening = useCallback(() => {
+    if (recognitionRef.current || isLoadingRef.current) return
+    if (typeof window === 'undefined') return
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setSpeechError('Voice input is not supported by this browser.')
+      setAutoListen(false)
+      return
+    }
+
+    setSpeechError('')
+    let finalTranscript = ''
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
+    recognition.interimResults = true
+    recognition.continuous = true
+    recognition.maxAlternatives = 1
+
+    recognition.onstart = () => {
+      setIsListening(true)
+    }
+
+    recognition.onspeechstart = () => {
+      cancelSpeechPlayback()
+    }
+
+    recognition.onresult = (event) => {
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0]?.transcript ?? ''
+        if (event.results[i].isFinal) {
+          finalTranscript += `${transcript} `
+        } else {
+          interim += transcript
+        }
+      }
+      const cleanedFinal = finalTranscript.trim()
+      const cleanedInterim = interim.trim()
+      setLiveTranscript(cleanedInterim || cleanedFinal)
+      setInput(cleanedFinal || cleanedInterim)
+    }
+
+    recognition.onerror = (event) => {
+      const message = event?.error
+        ? `Voice input error: ${event.error}`
+        : 'Voice input was interrupted.'
+      setSpeechError(message)
+      setAutoListen(false)
+      stopListening()
+    }
+
+    recognition.onend = async () => {
+      recognitionRef.current = null
+      setIsListening(false)
+      const cleaned = finalTranscript.trim()
+      setLiveTranscript('')
+      if (cleaned && !isLoadingRef.current) {
+        await sendMessageRef.current(cleaned)
+      }
+      if (autoListenRef.current && !isLoadingRef.current) {
+        setTimeout(() => {
+          if (autoListenRef.current && !isLoadingRef.current) {
+            startListening()
+          }
+        }, 350)
+      }
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+  }, [stopListening])
+
+  useEffect(() => {
+    if (autoListen) {
+      startListening()
+    }
+    return () => {
+      stopListening()
+    }
+  }, [autoListen, startListening, stopListening])
+
+  useEffect(() => {
+    if (!isLoading && autoListenRef.current && !recognitionRef.current) {
+      startListening()
+    }
+  }, [isLoading, startListening])
+
+  useEffect(() => {
+    return () => {
+      stopListening()
+      cancelSpeechPlayback()
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current)
+      }
+    }
+  }, [stopListening])
+
   const onSubmit = async (event) => {
     event.preventDefault()
     await sendMessage()
@@ -333,63 +463,6 @@ function App() {
     } catch {
       setCopiedId('')
     }
-  }
-
-  const startListening = () => {
-    if (isLoading || isListening) return
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setMessages((prev) => [...prev, createMessage('assistant', 'Voice input is not supported in this browser.')])
-      return
-    }
-
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'en-US'
-    recognition.interimResults = true
-    recognition.continuous = false
-    recognition.maxAlternatives = 1
-
-    let finalText = ''
-    recognition.onresult = (event) => {
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const transcript = event.results[i][0].transcript
-        if (event.results[i].isFinal) {
-          finalText += `${transcript} `
-        } else {
-          interim += transcript
-        }
-      }
-      const cleanedFinal = finalText.trim()
-      const cleanedInterim = interim.trim()
-      setLiveTranscript(cleanedInterim)
-      setInput(cleanedFinal || cleanedInterim)
-    }
-
-    recognition.onerror = () => {
-      setIsListening(false)
-      setLiveTranscript('')
-    }
-
-    recognition.onend = () => {
-      setIsListening(false)
-      setLiveTranscript('')
-      const cleaned = finalText.trim()
-      if (cleaned && !isLoading) {
-        sendMessage(cleaned)
-      }
-    }
-
-    recognitionRef.current = recognition
-    recognition.start()
-    setIsListening(true)
-  }
-
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-    }
-    setIsListening(false)
   }
 
   const formatTime = (value) =>
@@ -427,19 +500,28 @@ function App() {
           </select>
           <button
             type="button"
+            className={`ghost-btn ${autoListen ? 'active' : ''}`}
+            onClick={() => setAutoListen((value) => !value)}
+          >
+            {autoListen ? (isListening ? 'Listening...' : 'Mic Always On') : 'Mic Paused'}
+          </button>
+          <button
+            type="button"
             className={`ghost-btn ${autoSpeak ? 'active' : ''}`}
             onClick={() => setAutoSpeak((value) => !value)}
           >
             {autoSpeak ? 'Speaker On' : 'Speaker Off'}
           </button>
-          <button
-            type="button"
-            className={`ghost-btn ${isListening ? 'active' : ''}`}
-            onClick={isListening ? stopListening : startListening}
-            disabled={isLoading}
-          >
-            {isListening ? 'Listening...' : 'Mic'}
-          </button>
+          <div className="mic-status-row">
+            <span className="mic-status">
+              {autoListen
+                ? isListening
+                  ? 'Mic ready, just speak—interrupt anytime.'
+                  : 'Warming up the mic...'
+                : 'Mic is paused; tap to resume listening.'}
+            </span>
+            {speechError && <span className="mic-error">{speechError}</span>}
+          </div>
         </div>
 
         <div className="model-picker">
