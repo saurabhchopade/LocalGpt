@@ -15,6 +15,13 @@
   justify-content: space-between;
   min-height: 48px;
   padding: 0 0.25rem;
+  gap: 0.75rem;
+}
+
+.title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
 }
 
 .app-title {
@@ -22,6 +29,12 @@
   font-size: 1.05rem;
   font-weight: 600;
   color: #111827;
+}
+
+.active-model {
+  font-size: 0.78rem;
+  color: #4b5563;
+  font-weight: 600;
 }
 
 .model-picker {
@@ -41,6 +54,30 @@
 .model-picker select:focus {
   outline: 2px solid #b8d4ff;
   border-color: #8bb4f8;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.ghost-btn {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 8px;
+  padding: 0.34rem 0.6rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  background: #f3f4f6;
+}
+
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .chat-window {
@@ -132,10 +169,58 @@
   min-height: 1.2rem;
 }
 
+.meta-row {
+  margin-top: 0.35rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timestamp {
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.copy-btn {
+  border: 0;
+  background: transparent;
+  font-size: 0.72rem;
+  color: #4b5563;
+  cursor: pointer;
+  padding: 0;
+}
+
+.copy-btn:hover {
+  color: #1f2937;
+}
+
+.typing-dots {
+  display: inline-block;
+  width: 26px;
+  height: 6px;
+  border-radius: 999px;
+  background: #9ca3af;
+  box-shadow: 10px 0 0 #9ca3af, 20px 0 0 #9ca3af;
+  animation: dots 1.1s infinite linear;
+}
+
+@keyframes dots {
+  0% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.35;
+  }
+}
+
 .composer {
   position: sticky;
   bottom: 0.65rem;
-  border: 1px solid #d8dde6;
+  border: 1px solid #bcc5d4;
   border-radius: 16px;
   padding: 0.55rem;
   background: #fff;
@@ -162,8 +247,8 @@
 }
 
 .composer:focus-within {
-  border-color: #8bb4f8;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 
 .actions {
@@ -195,9 +280,84 @@
   cursor: not-allowed;
 }
 
+.md-block {
+  display: block;
+}
+
+.md-line {
+  margin: 0;
+}
+
+.line-space {
+  height: 0.52rem;
+}
+
+.md-block ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.md-block code {
+  background: rgba(15, 23, 42, 0.08);
+  border-radius: 6px;
+  padding: 0.08rem 0.3rem;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  font-size: 0.84em;
+}
+
+.code-block {
+  margin: 0;
+  margin-top: 0.25rem;
+  background: #0b1020;
+  color: #e2e8f0;
+  border-radius: 10px;
+  overflow: auto;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+}
+
+.code-header {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  background: #111827;
+  border-bottom: 1px solid #1f2937;
+  text-transform: lowercase;
+}
+
+.code-block code {
+  display: block;
+  padding: 0.55rem;
+  white-space: pre;
+}
+
+.token-keyword {
+  color: #93c5fd;
+}
+
+.token-string {
+  color: #86efac;
+}
+
+.token-number {
+  color: #fca5a5;
+}
+
+.token-comment {
+  color: #94a3b8;
+  font-style: italic;
+}
+
 @media (max-width: 768px) {
   .app-shell {
     padding: 0.5rem 0.55rem;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .header-actions {
+    margin-left: auto;
   }
 
   .message-bubble {
@@ -208,6 +368,20 @@
 @media (prefers-color-scheme: dark) {
   .app-title {
     color: #e5e7eb;
+  }
+
+  .active-model {
+    color: #9ca3af;
+  }
+
+  .ghost-btn {
+    background: #1f2937;
+    color: #d1d5db;
+    border-color: #374151;
+  }
+
+  .ghost-btn:hover {
+    background: #111827;
   }
 
   .model-picker select {
@@ -235,6 +409,52 @@
     color: #eff6ff;
   }
 
+  .timestamp {
+    color: #9ca3af;
+  }
+
+  .copy-btn {
+    color: #d1d5db;
+  }
+
+  .copy-btn:hover {
+    color: #f3f4f6;
+  }
+
+  .typing-dots {
+    background: #cbd5e1;
+    box-shadow: 10px 0 0 #cbd5e1, 20px 0 0 #cbd5e1;
+  }
+
+  .md-block code {
+    background: rgba(148, 163, 184, 0.2);
+  }
+
+  .code-block {
+    background: #0b1220;
+  }
+
+  .code-header {
+    background: #0f172a;
+    border-bottom-color: #1e293b;
+  }
+
+  .token-keyword {
+    color: #bfdbfe;
+  }
+
+  .token-string {
+    color: #bbf7d0;
+  }
+
+  .token-number {
+    color: #fecaca;
+  }
+
+  .token-comment {
+    color: #94a3b8;
+  }
+
   .composer {
     background: #111827;
     border-color: #374151;
@@ -242,5 +462,9 @@
 
   .composer textarea {
     color: #f3f4f6;
+  }
+
+  .composer textarea::placeholder {
+    color: #9ca3af;
   }
 }
