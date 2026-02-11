@@ -78,8 +78,11 @@ Request body:
 ## 8 GB RAM Notes
 
 - Context window is capped to keep memory low:
-  - `MODEL_NUM_CTX=1024`
+  - `MODEL_NUM_CTX=2048`
   - `MAX_HISTORY_MESSAGES=12`
+  - `MAX_RESPONSE_TOKENS=256`
+  - `MODEL_NUM_THREAD=8`
+  - `MODEL_NUM_BATCH=512`
 - Ollama is configured for single-model, single-parallel execution.
 - If memory is tight, use a smaller model in UI model input (for example `qwen2.5:3b` after pulling it in Ollama).
 
@@ -88,3 +91,5 @@ Request body:
 ```bash
 docker compose down
 ```
+
+

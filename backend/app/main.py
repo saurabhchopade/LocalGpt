@@ -12,8 +12,10 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "qwen2.5:1.5b")
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "12"))
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
-MODEL_NUM_CTX = int(os.getenv("MODEL_NUM_CTX", "1024"))
-MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "180"))
+MODEL_NUM_CTX = int(os.getenv("MODEL_NUM_CTX", "2048"))
+MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "256"))
+MODEL_NUM_THREAD = int(os.getenv("MODEL_NUM_THREAD", str(os.cpu_count() or 4)))
+MODEL_NUM_BATCH = int(os.getenv("MODEL_NUM_BATCH", "512"))
 VOICE_ASSISTANT_MODE = os.getenv("VOICE_ASSISTANT_MODE", "true").lower() == "true"
 OPENTTS_URL = os.getenv("OPENTTS_URL", "http://opentts:5500")
 TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "coqui-tts:en_ljspeech")
@@ -91,6 +93,8 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 "num_ctx": MODEL_NUM_CTX,
                 "temperature": 0.7,
                 "num_predict": MAX_RESPONSE_TOKENS,
+                "num_thread": MODEL_NUM_THREAD,
+                "num_batch": MODEL_NUM_BATCH,
             },
         }
 
@@ -171,3 +175,6 @@ async def speak(request: SpeakRequest) -> Response:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TTS request failed: {exc}") from exc
+
+
+
