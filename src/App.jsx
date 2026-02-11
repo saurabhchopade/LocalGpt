@@ -529,6 +529,14 @@ function App() {
   const formatTime = (value) =>
     new Date(value || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
+  const statusText = (() => {
+    if (isLoading) return 'Thinking...'
+    if (isSpeaking) return 'Speaking...'
+    if (isListening) return 'Listening - Ready to respond'
+    if (autoListen) return 'Mic warming up...'
+    return 'Mic paused'
+  })()
+
   const onKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -621,6 +629,17 @@ function App() {
           {liveTranscript}
         </div>
       )}
+
+      <div className="status-bar">
+        <div className={`status-dot ${isLoading ? 'thinking' : isSpeaking ? 'speaking' : isListening ? 'listening' : 'paused'}`} />
+        <span className="status-text">{statusText}</span>
+        <div className="eq">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
 
       <main className="chat-window">
         {messages.length === 0 && (
