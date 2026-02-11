@@ -46,9 +46,9 @@ services:
       OLLAMA_URL: http://ollama:11434
       DEFAULT_MODEL: qwen2.5:1.5b
       MAX_HISTORY_MESSAGES: 12
-      MODEL_NUM_CTX: 2048
+      MODEL_NUM_CTX: 4096
       REQUEST_TIMEOUT: 180
-      MAX_RESPONSE_TOKENS: 256
+      MAX_RESPONSE_TOKENS: 1024
       MODEL_NUM_THREAD: 8
       MODEL_NUM_BATCH: 512
     expose:
@@ -67,4 +67,3 @@ services:
 
 volumes:
   ollama_data:
-

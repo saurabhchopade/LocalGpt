@@ -2,13 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const MODEL_OPTIONS = [
-  'qwen2.5:1.5b',
-  'qwen2.5:3b',
-  'qwen2.5:7b',
-  'deepseek-coder:6.7b',
-  'mistral-7b-v0.1',
-  'meta-llama/Llama-3-7b',
-]
+  'qwen2.5:1.5b']
 
 const createMessage = (role, content = '') => ({
   id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -699,3 +693,4 @@ function App() {
 }
 
 export default App
+
