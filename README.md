@@ -40,6 +40,20 @@ localGpt/
 - Local Ollama integration, no cloud APIs
 - Memory-aware defaults for low-RAM systems
 
+## UI Preview
+
+### Home Screen
+
+Shows the default assistant landing experience with suggested prompts, task cards, and the quick input bar.
+
+![Home Screen](docs/images/chat-home-view.png)
+
+### Conversation Screen
+
+Shows an active chat with rich markdown formatting (headings, bullets, and structured long-form responses) in the assistant panel.
+
+![Conversation Screen](docs/images/chat-conversation-view.png)
+
 ## Run Locally
 
 1. Start Docker Desktop.
